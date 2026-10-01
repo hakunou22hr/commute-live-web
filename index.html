@@ -34,14 +34,26 @@
       </div>
 
       <div class="route-grid">
-        <label>出発地
-          <select id="originSelect"></select>
-        </label>
+        <div class="route-place">
+          <label>出発地
+            <select id="originSelect"></select>
+          </label>
+          <label class="direct-entry">または住所・名称を入力
+            <input id="originText" list="savedPlaceSuggestions" maxlength="120" autocomplete="street-address" placeholder="例：弘前駅、青森市○○町1-2-3">
+          </label>
+        </div>
         <button id="swapBtn" class="swap-button" aria-label="出発地と到着地を入れ替える">⇄</button>
-        <label>到着地
-          <select id="destinationSelect"></select>
-        </label>
+        <div class="route-place">
+          <label>到着地
+            <select id="destinationSelect"></select>
+          </label>
+          <label class="direct-entry">または住所・名称を入力
+            <input id="destinationText" list="savedPlaceSuggestions" maxlength="120" autocomplete="street-address" placeholder="例：勤務先名、弘前市○○町4-5-6">
+          </label>
+        </div>
       </div>
+      <datalist id="savedPlaceSuggestions"></datalist>
+      <p class="note route-input-note">入力欄に住所・施設名を直接入れた場合は、その文字列をGoogle Mapsへ渡して検索します。保存地点を選ぶ場合は入力欄を空にしてください。</p>
 
       <div class="route-summary">
         <strong id="routeTitle">地点を登録してください</strong>
