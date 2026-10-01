@@ -225,6 +225,7 @@ function loadGoogleMapsScript(apiKey) {
       params.set('libraries', [...requestedLibraries].join(','));
       params.set('key', apiKey);
       params.set('v', 'weekly');
+      params.set('auth_referrer_policy', 'origin');
       params.set('callback', 'google.maps.__ib__');
 
       mapsNamespace.__ib__ = resolve;
@@ -1158,7 +1159,7 @@ function normalizeGoogleError(error) {
   const raw = String(error?.message || error || '不明なエラー');
 
   if (/referer|referrer|not authorized|denied|api key/i.test(raw)) {
-    return 'APIキーのWebサイト制限またはAPI制限を確認してください。Maps JavaScript APIとRoutes APIが必要です。';
+    return 'APIキーのWebサイト制限を https://hakunou22hr.github.io に設定し、API制限に Maps JavaScript API と Routes API の両方が含まれているか確認してください。';
   }
 
   if (/billing/i.test(raw)) {
@@ -1237,6 +1238,6 @@ function emptyFeatureCollection() {
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('./sw.js?v=7').catch(() => {});
+    navigator.serviceWorker.register('./sw.js?v=8').catch(() => {});
   });
 }
