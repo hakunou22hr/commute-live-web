@@ -12,7 +12,7 @@
   <link rel="icon" href="./icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="./icon.svg">
   <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@^6.11.2/dist/maplibre-gl.css">
-  <link rel="stylesheet" href="./styles.css?v=8">
+  <link rel="stylesheet" href="./styles.css?v=9">
 </head>
 <body>
   <header class="app-header">
@@ -100,9 +100,16 @@
           </div>
           <label class="check-row">
             <input id="autoSpeakToggle" type="checkbox">
-            解析後に短い音声案内を試す
+            解析後に短い音声案内を流す
           </label>
-          <p class="note">Google Cloudでは、このキーを <strong>Webサイト</strong> 制限にし、<code>https://hakunou22hr.github.io/commute-live-web/*</code> だけを許可してください。API制限は <strong>Maps JavaScript API</strong> と <strong>Routes API</strong> に限定します。</p>
+          <label>読み上げ音声
+            <select id="voiceSelect">
+              <option value="">自動（日本語の自然な音声を優先）</option>
+            </select>
+          </label>
+          <button id="testVoiceBtn" type="button" class="secondary">音声を試す</button>
+          <p class="note">iPhoneで利用できる日本語音声から選べます。「自動」では日本語・端末内音声・自然な音声を優先します。</p>
+          <p class="note">Google Cloudでは、このキーを <strong>Webサイト</strong> 制限にし、<code>https://hakunou22hr.github.io</code> と <code>https://hakunou22hr.github.io/commute-live-web/*</code> を許可してください。API制限は <strong>Maps JavaScript API</strong> と <strong>Routes API</strong> に限定します。</p>
           <p class="note">1回の解析でGoogle経路計算を最大2回使います。アプリ側では1日30解析までに制限します。</p>
         </div>
       </details>
@@ -117,7 +124,18 @@
         <span id="locationStatus" class="subtle">現在地未取得</span>
       </div>
       <div id="map" role="region" aria-label="地図"></div>
-      <p id="mapNote" class="note">APIキー未設定時はMapLibre + OpenFreeMapで位置確認します。Google交通解析を有効にすると、Google経路データはGoogle Map上だけに表示します。</p>
+      <div id="mapTapChoice" class="map-tap-choice" hidden>
+        <div>
+          <strong>この地点を使いますか？</strong>
+          <span id="mapTapCoords" class="subtle"></span>
+        </div>
+        <div class="map-tap-actions">
+          <button id="setMapOriginBtn" type="button" class="secondary">出発地にする</button>
+          <button id="setMapDestinationBtn" type="button" class="secondary">到着地にする</button>
+          <button id="cancelMapTapBtn" type="button" class="secondary">取消</button>
+        </div>
+      </div>
+      <p id="mapNote" class="note">地図をタップすると、その地点を出発地または到着地として設定できます。Google交通解析を有効にすると、Google経路データはGoogle Map上に表示します。</p>
     </section>
 
     <section class="panel">
@@ -179,6 +197,6 @@
   </main>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
-  <script type="module" src="./app.js?v=8"></script>
+  <script type="module" src="./app.js?v=9"></script>
 </body>
 </html>
