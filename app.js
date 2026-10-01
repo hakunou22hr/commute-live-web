@@ -5,7 +5,7 @@ const PREF_KEY = 'commute-live-web.route.v1';
 const JARTIC_URL = 'https://www.jartic.or.jp/map/?p=R02';
 const AOMORI_ROAD_URL = 'https://aomori.cc/road/sp/';
 let places = loadJSON(STORAGE_KEY, []);
-let prefs = loadJSON(PREF_KEY, { origin: '__current__', destination: '' });
+let prefs = loadJSON(PREF_KEY, { origin: '__current__', destination: '', originText: '', destinationText: '' });
 let currentLocation = null;
 let map;
 const markers = new Map();
@@ -13,6 +13,8 @@ const markers = new Map();
 const $ = (id) => document.getElementById(id);
 const originSelect = $('originSelect');
 const destinationSelect = $('destinationSelect');
+const originText = $('originText');
+const destinationText = $('destinationText');
 
 initMap();
 render();
@@ -21,16 +23,43 @@ window.addEventListener('online', updateNetwork);
 window.addEventListener('offline', updateNetwork);
 
 $('swapBtn').addEventListener('click', () => {
-  const o = originSelect.value;
+  const selectedOrigin = originSelect.value;
   originSelect.value = destinationSelect.value;
-  destinationSelect.value = o;
+  destinationSelect.value = selectedOrigin;
+
+  const typedOrigin = originText.value;
+  originText.value = destinationText.value;
+  destinationText.value = typedOrigin;
+
   saveRoutePrefs();
   updateRouteSummary();
   fitSelectedPlaces();
 });
 
-originSelect.addEventListener('change', () => { saveRoutePrefs(); updateRouteSummary(); fitSelectedPlaces(); });
-destinationSelect.addEventListener('change', () => { saveRoutePrefs(); updateRouteSummary(); fitSelectedPlaces(); });
+originSelect.addEventListener('change', () => {
+  if (originSelect.value) originText.value = '';
+  saveRoutePrefs();
+  updateRouteSummary();
+  fitSelectedPlaces();
+});
+destinationSelect.addEventListener('change', () => {
+  if (destinationSelect.value) destinationText.value = '';
+  saveRoutePrefs();
+  updateRouteSummary();
+  fitSelectedPlaces();
+});
+originText.addEventListener('input', () => {
+  if (originText.value.trim()) originSelect.value = '';
+  saveRoutePrefs();
+  updateRouteSummary();
+  updateSelectedLine();
+});
+destinationText.addEventListener('input', () => {
+  if (destinationText.value.trim()) destinationSelect.value = '';
+  saveRoutePrefs();
+  updateRouteSummary();
+  updateSelectedLine();
+});
 $('locateBtn').addEventListener('click', () => locate(true));
 $('useCurrentBtn').addEventListener('click', async () => {
   const pos = await locate(true);
@@ -65,13 +94,18 @@ $('placeForm').addEventListener('submit', (event) => {
 });
 
 $('googleMapsBtn').addEventListener('click', async () => {
-  if (originSelect.value === '__current__' && !currentLocation) {
+  const typedOrigin = originText.value.trim();
+  const typedDestination = destinationText.value.trim();
+
+  if (!typedOrigin && originSelect.value === '__current__' && !currentLocation) {
     const pos = await locate(false);
     if (!pos) return;
   }
-  const origin = selectedValue(originSelect.value, true);
-  const destination = selectedValue(destinationSelect.value, false);
-  if (!origin || !destination) return toast('出発地と到着地を設定してください。');
+
+  const origin = typedOrigin || selectedValue(originSelect.value, true);
+  const destination = typedDestination || selectedValue(destinationSelect.value, false);
+
+  if (!origin || !destination) return toast('出発地と到着地を、保存地点から選ぶか住所・名称で入力してください。');
   const url = new URL('https://www.google.com/maps/dir/');
   url.searchParams.set('api', '1');
   url.searchParams.set('origin', origin);
@@ -123,6 +157,7 @@ function initMap() {
 
 function render() {
   renderSelects();
+  renderSuggestions();
   renderPlaces();
   updateMarkers();
   updateRouteSummary();
@@ -137,6 +172,23 @@ function renderSelects() {
     const previous = select === originSelect ? prefs.origin : prefs.destination;
     select.innerHTML = '<option value="">選択してください</option>' + options.map(p => `<option value="${escapeHtml(p.id)}">${escapeHtml(p.name)}</option>`).join('');
     select.value = options.some(p => p.id === previous) ? previous : (select === originSelect ? '__current__' : '');
+  }
+
+  originText.value = prefs.originText || '';
+  destinationText.value = prefs.destinationText || '';
+
+  if (originText.value.trim()) originSelect.value = '';
+  if (destinationText.value.trim()) destinationSelect.value = '';
+}
+
+function renderSuggestions() {
+  const list = $('savedPlaceSuggestions');
+  list.innerHTML = '';
+  for (const place of places) {
+    const option = document.createElement('option');
+    option.value = place.address || place.name;
+    option.label = place.name;
+    list.appendChild(option);
   }
 }
 
@@ -189,8 +241,8 @@ function updateMarkers() {
 
 function updateSelectedLine() {
   if (!map || !map.isStyleLoaded() || !map.getSource('selected-pair')) return;
-  const a = selectedCoords(originSelect.value);
-  const b = selectedCoords(destinationSelect.value);
+  const a = originText.value.trim() ? null : selectedCoords(originSelect.value);
+  const b = destinationText.value.trim() ? null : selectedCoords(destinationSelect.value);
   const data = (a && b) ? {
     type: 'FeatureCollection',
     features: [{ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: [[a.lng,a.lat],[b.lng,b.lat]] } }]
@@ -201,7 +253,10 @@ function updateSelectedLine() {
 function fitSelectedPlaces() {
   updateSelectedLine();
   if (!map) return;
-  const coords = [selectedCoords(originSelect.value), selectedCoords(destinationSelect.value)].filter(Boolean);
+  const coords = [
+    originText.value.trim() ? null : selectedCoords(originSelect.value),
+    destinationText.value.trim() ? null : selectedCoords(destinationSelect.value)
+  ].filter(Boolean);
   if (coords.length === 2) {
     const bounds = new maplibregl.LngLatBounds([coords[0].lng, coords[0].lat], [coords[0].lng, coords[0].lat]);
     bounds.extend([coords[1].lng, coords[1].lat]);
@@ -257,14 +312,26 @@ function selectedCoords(id) {
 
 function updateRouteSummary() {
   const nameFor = (id) => id === '__current__' ? '現在地' : (places.find(p => p.id === id)?.name || '');
-  const a = nameFor(originSelect.value);
-  const b = nameFor(destinationSelect.value);
-  $('routeTitle').textContent = a && b ? `${a} → ${b}` : '出発地と到着地を選択してください';
-  $('routeHint').textContent = a && b ? '地図の点線は位置関係で、実際の道路ルートではありません。Google Mapsで最新交通を確認します。' : '保存地点はこの端末だけに保存されます。';
+  const a = originText.value.trim() || nameFor(originSelect.value);
+  const b = destinationText.value.trim() || nameFor(destinationSelect.value);
+  $('routeTitle').textContent = a && b ? `${a} → ${b}` : '出発地と到着地を設定してください';
+
+  if (a && b && (originText.value.trim() || destinationText.value.trim())) {
+    $('routeHint').textContent = '入力した住所・名称はGoogle Mapsへ渡して検索します。アプリ内地図の点線は表示されない場合があります。';
+  } else if (a && b) {
+    $('routeHint').textContent = '地図の点線は位置関係で、実際の道路ルートではありません。Google Mapsで最新交通を確認します。';
+  } else {
+    $('routeHint').textContent = '保存地点から選ぶか、住所・施設名を直接入力できます。';
+  }
 }
 
 function saveRoutePrefs() {
-  prefs = { origin: originSelect.value, destination: destinationSelect.value };
+  prefs = {
+    origin: originSelect.value,
+    destination: destinationSelect.value,
+    originText: originText.value.trim(),
+    destinationText: destinationText.value.trim()
+  };
   saveJSON(PREF_KEY, prefs);
 }
 
