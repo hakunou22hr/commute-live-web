@@ -701,7 +701,6 @@ async function analyzeTraffic({ speak = false, force = false } = {}) {
         'warnings'
       ],
       language: 'ja',
-      units: google.maps.UnitSystem.METRIC
     };
 
     const normalRequest = {
@@ -721,7 +720,6 @@ async function analyzeTraffic({ speak = false, force = false } = {}) {
         'warnings'
       ],
       language: 'ja',
-      units: google.maps.UnitSystem.METRIC
     };
 
     const [trafficResult, normalResult] = await Promise.all([
