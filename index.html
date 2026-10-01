@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#0b1220">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="通勤ルートLIVE">
+  <title>通勤ルートLIVE</title>
+  <link rel="manifest" href="./manifest.json">
+  <link rel="icon" href="./icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="./icon.svg">
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@^6.11.2/dist/maplibre-gl.css">
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <header class="app-header">
+    <div>
+      <p class="eyebrow">無料PWA・APIキー不要</p>
+      <h1>通勤ルートLIVE</h1>
+    </div>
+    <button id="locateBtn" class="icon-button" aria-label="現在地へ移動">◎</button>
+  </header>
+
+  <main>
+    <section class="panel route-panel" aria-labelledby="route-heading">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">出発前に確認</p>
+          <h2 id="route-heading">今日の経路</h2>
+        </div>
+        <span id="networkBadge" class="badge">確認中</span>
+      </div>
+
+      <div class="route-grid">
+        <label>出発地
+          <select id="originSelect"></select>
+        </label>
+        <button id="swapBtn" class="swap-button" aria-label="出発地と到着地を入れ替える">⇄</button>
+        <label>到着地
+          <select id="destinationSelect"></select>
+        </label>
+      </div>
+
+      <div class="route-summary">
+        <strong id="routeTitle">地点を登録してください</strong>
+        <span id="routeHint">実際の交通状況を考慮した経路はGoogle Mapsで確認します。</span>
+      </div>
+
+      <div class="primary-actions">
+        <button id="googleMapsBtn" class="primary">Google Mapsで最適ルート</button>
+        <button id="jarticBtn" class="danger">JARTICで渋滞・事故・規制</button>
+        <button id="snowBtn" class="snow">雪・冬期道路情報</button>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">MapLibre + OpenFreeMap</p>
+          <h2>地図</h2>
+        </div>
+        <span id="locationStatus" class="subtle">現在地未取得</span>
+      </div>
+      <div id="map" role="region" aria-label="地図"></div>
+      <p class="note">この地図は位置確認用です。渋滞を反映した走行ルートはGoogle Mapsへ引き渡します。</p>
+    </section>
+
+    <section class="panel">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">端末内だけに保存</p>
+          <h2>保存地点</h2>
+        </div>
+        <button id="useCurrentBtn" class="secondary">現在地を保存</button>
+      </div>
+
+      <form id="placeForm" class="place-form">
+        <label>名称
+          <input id="placeName" required maxlength="30" placeholder="例：自宅、勤務地">
+        </label>
+        <label>住所・目印（任意）
+          <input id="placeAddress" maxlength="100" placeholder="Google Maps検索にも利用できます">
+        </label>
+        <div class="coord-grid">
+          <label>緯度
+            <input id="placeLat" inputmode="decimal" placeholder="40.000000">
+          </label>
+          <label>経度
+            <input id="placeLng" inputmode="decimal" placeholder="140.000000">
+          </label>
+        </div>
+        <button class="secondary" type="submit">地点を追加</button>
+      </form>
+      <div id="placesList" class="places-list"></div>
+    </section>
+
+    <section class="panel status-panel">
+      <h2>道路情報の確認先</h2>
+      <div class="status-cards">
+        <article>
+          <strong>JARTIC</strong>
+          <p>渋滞、事故、通行止め、車線規制、片側交互通行、チェーン・冬用タイヤ規制などを確認。</p>
+        </article>
+        <article>
+          <strong>青森みち情報</strong>
+          <p>雪・緊急規制・道路画像・通行規制などの公式系情報を確認。</p>
+        </article>
+      </div>
+      <button id="speakBtn" class="secondary">音声で確認ポイントを読む</button>
+    </section>
+
+    <section class="panel">
+      <h2>このアプリについて</h2>
+      <p class="note">位置・保存地点はこの端末のブラウザ内にだけ保存します。運転中の操作はせず、道路標識・警察・道路管理者の指示を優先してください。</p>
+      <p class="note">PWA自体はバックグラウンドでGoogle Maps同等の再ルート監視を行いません。走行ナビはGoogle Mapsへ引き渡します。</p>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
