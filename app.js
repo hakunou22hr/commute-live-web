@@ -10,9 +10,18 @@ const JARTIC_URL = 'https://www.jartic.or.jp/map/?p=R02';
 const AOMORI_ROAD_URL = 'https://aomori.cc/road/sp/';
 
 let places = loadJSON(STORAGE_KEY, []);
-let prefs = loadJSON(PREF_KEY, { origin: '__current__', destination: '', originText: '', destinationText: '' });
-let googleSettings = loadJSON(GOOGLE_SETTINGS_KEY, { apiKey: '', autoSpeak: true });
+let prefs = loadJSON(PREF_KEY, {
+  origin: '__current__',
+  destination: '',
+  originText: '',
+  destinationText: '',
+  mapOrigin: null,
+  mapDestination: null
+});
+let googleSettings = loadJSON(GOOGLE_SETTINGS_KEY, { apiKey: '', autoSpeak: true, voiceURI: '' });
 let currentLocation = null;
+let pendingMapPoint = null;
+let japaneseVoices = [];
 
 let mapMode = 'open';
 let mapLibre = null;
@@ -37,6 +46,7 @@ setupListeners();
 render();
 updateNetwork();
 updateUsageUI();
+prepareVoices();
 initMapExperience();
 
 window.addEventListener('online', updateNetwork);
@@ -52,6 +62,10 @@ function setupListeners() {
     originText.value = destinationText.value;
     destinationText.value = typedOrigin;
 
+    const mapOrigin = prefs.mapOrigin || null;
+    prefs.mapOrigin = prefs.mapDestination || null;
+    prefs.mapDestination = mapOrigin;
+
     saveRoutePrefs();
     updateRouteSummary();
     fitSelectedPlaces();
@@ -60,6 +74,7 @@ function setupListeners() {
 
   originSelect.addEventListener('change', () => {
     if (originSelect.value) originText.value = '';
+    prefs.mapOrigin = null;
     saveRoutePrefs();
     updateRouteSummary();
     fitSelectedPlaces();
@@ -68,6 +83,7 @@ function setupListeners() {
 
   destinationSelect.addEventListener('change', () => {
     if (destinationSelect.value) destinationText.value = '';
+    prefs.mapDestination = null;
     saveRoutePrefs();
     updateRouteSummary();
     fitSelectedPlaces();
@@ -76,6 +92,7 @@ function setupListeners() {
 
   originText.addEventListener('input', () => {
     if (originText.value.trim()) originSelect.value = '';
+    prefs.mapOrigin = null;
     saveRoutePrefs();
     updateRouteSummary();
     updateSelectedLine();
@@ -83,6 +100,7 @@ function setupListeners() {
 
   destinationText.addEventListener('input', () => {
     if (destinationText.value.trim()) destinationSelect.value = '';
+    prefs.mapDestination = null;
     saveRoutePrefs();
     updateRouteSummary();
     updateSelectedLine();
@@ -157,7 +175,8 @@ function setupListeners() {
     if (!key) return toast('Web用APIキーを入力してください。');
     googleSettings = {
       apiKey: key,
-      autoSpeak: $('autoSpeakToggle').checked
+      autoSpeak: $('autoSpeakToggle').checked,
+      voiceURI: $('voiceSelect').value || googleSettings.voiceURI || ''
     };
     saveJSON(GOOGLE_SETTINGS_KEY, googleSettings);
     toast('この端末にGoogle交通解析設定を保存しました。再読み込みします。');
@@ -175,11 +194,25 @@ function setupListeners() {
     googleSettings.autoSpeak = $('autoSpeakToggle').checked;
     saveJSON(GOOGLE_SETTINGS_KEY, googleSettings);
   });
+
+  $('voiceSelect').addEventListener('change', () => {
+    googleSettings.voiceURI = $('voiceSelect').value;
+    saveJSON(GOOGLE_SETTINGS_KEY, googleSettings);
+  });
+
+  $('testVoiceBtn').addEventListener('click', () => {
+    speakText('交通状況をご案内します。日本語の音声を、できるだけ自然に読み上げます。');
+  });
+
+  $('setMapOriginBtn').addEventListener('click', () => applyPendingMapPoint('origin'));
+  $('setMapDestinationBtn').addEventListener('click', () => applyPendingMapPoint('destination'));
+  $('cancelMapTapBtn').addEventListener('click', hideMapTapChoice);
 }
 
 async function initMapExperience() {
   $('googleApiKey').value = googleSettings.apiKey || '';
   $('autoSpeakToggle').checked = googleSettings.autoSpeak !== false;
+  renderVoiceOptions();
   updateGoogleModeBadge();
 
   if (!googleSettings.apiKey) {
@@ -271,6 +304,9 @@ function initOpenMap() {
     });
 
     mapLibre.addControl(new maplibregl.NavigationControl({ showCompass: true }), 'top-right');
+    mapLibre.on('click', (event) => {
+      showMapTapChoice({ lat: event.lngLat.lat, lng: event.lngLat.lng });
+    });
 
     mapLibre.on('load', () => {
       mapLibre.addSource('selected-pair', { type: 'geojson', data: emptyFeatureCollection() });
@@ -318,6 +354,11 @@ function initGoogleMap() {
     streetViewControl: false,
     fullscreenControl: false,
     gestureHandling: 'greedy'
+  });
+
+  googleMap.addListener('click', (event) => {
+    if (!event.latLng) return;
+    showMapTapChoice({ lat: event.latLng.lat(), lng: event.latLng.lng() });
   });
 
   $('mapNote').innerHTML = 'Google交通解析モード：経路・渋滞データはGoogle Map上に表示します。<span class="google-attribution"><strong>Google</strong> の経路データを使用</span>';
@@ -445,6 +486,9 @@ function updateOpenMarkers() {
     openMarkers.set('__current__', marker);
   }
 
+  addOpenPickedMarker('map-origin', prefs.mapOrigin, '出', '#22c55e', '地図で選択した出発地');
+  addOpenPickedMarker('map-destination', prefs.mapDestination, '着', '#ef4444', '地図で選択した到着地');
+
   updateSelectedLine();
 }
 
@@ -471,14 +515,32 @@ function updateGoogleMarkers() {
     });
     googleMapMarkers.push(marker);
   }
+
+  if (prefs.mapOrigin) {
+    googleMapMarkers.push(new google.maps.Marker({
+      map: googleMap,
+      position: prefs.mapOrigin,
+      title: '地図で選択した出発地',
+      label: '出'
+    }));
+  }
+
+  if (prefs.mapDestination) {
+    googleMapMarkers.push(new google.maps.Marker({
+      map: googleMap,
+      position: prefs.mapDestination,
+      title: '地図で選択した到着地',
+      label: '着'
+    }));
+  }
 }
 
 function updateSelectedLine() {
   if (mapMode !== 'open') return;
   if (!mapLibre || !mapLibre.isStyleLoaded() || !mapLibre.getSource('selected-pair')) return;
 
-  const a = originText.value.trim() ? null : selectedCoords(originSelect.value);
-  const b = destinationText.value.trim() ? null : selectedCoords(destinationSelect.value);
+  const a = prefs.mapOrigin || (originText.value.trim() ? null : selectedCoords(originSelect.value));
+  const b = prefs.mapDestination || (destinationText.value.trim() ? null : selectedCoords(destinationSelect.value));
 
   const data = (a && b)
     ? {
@@ -499,8 +561,8 @@ function updateSelectedLine() {
 
 function fitSelectedPlaces() {
   const coords = [
-    originText.value.trim() ? null : selectedCoords(originSelect.value),
-    destinationText.value.trim() ? null : selectedCoords(destinationSelect.value)
+    prefs.mapOrigin || (originText.value.trim() ? null : selectedCoords(originSelect.value)),
+    prefs.mapDestination || (destinationText.value.trim() ? null : selectedCoords(destinationSelect.value))
   ].filter(Boolean);
 
   if (mapMode === 'open') {
@@ -605,8 +667,8 @@ async function routeEndpoints() {
     if (!pos) return null;
   }
 
-  const origin = typedOrigin || routeEndpointValue(originSelect.value, true);
-  const destination = typedDestination || routeEndpointValue(destinationSelect.value, false);
+  const origin = typedOrigin || prefs.mapOrigin || routeEndpointValue(originSelect.value, true);
+  const destination = typedDestination || prefs.mapDestination || routeEndpointValue(destinationSelect.value, false);
 
   if (!origin || !destination) {
     toast('出発地と到着地を、保存地点から選ぶか住所・名称で入力してください。');
@@ -641,8 +703,8 @@ function scheduleAutomaticAnalysis(delay = 1200) {
 }
 
 function hasBothRouteEndpoints() {
-  const originReady = Boolean(originText.value.trim() || originSelect.value);
-  const destinationReady = Boolean(destinationText.value.trim() || destinationSelect.value);
+  const originReady = Boolean(originText.value.trim() || prefs.mapOrigin || originSelect.value);
+  const destinationReady = Boolean(destinationText.value.trim() || prefs.mapDestination || destinationSelect.value);
   return originReady && destinationReady;
 }
 
@@ -1037,9 +1099,27 @@ function speakText(text) {
   }
 
   speechSynthesis.cancel();
-  const utterance = new SpeechSynthesisUtterance(text);
-  utterance.lang = 'ja-JP';
-  utterance.rate = 1.02;
+
+  const utterance = new SpeechSynthesisUtterance(
+    String(text)
+      .replace(/。+/g, '。 ')
+      .replace(/、+/g, '、 ')
+      .replace(/\s+/g, ' ')
+      .trim()
+  );
+
+  const voice = bestJapaneseVoice();
+  if (voice) {
+    utterance.voice = voice;
+    utterance.lang = voice.lang || 'ja-JP';
+  } else {
+    utterance.lang = 'ja-JP';
+  }
+
+  // iPhoneでは少しゆっくりめの方が日本語の抑揚が自然になりやすい。
+  utterance.rate = 0.94;
+  utterance.pitch = 1.0;
+  utterance.volume = 1.0;
 
   try {
     speechSynthesis.speak(utterance);
@@ -1068,13 +1148,138 @@ function endpointForUrl(value) {
   return String(value || '');
 }
 
+function showMapTapChoice(point) {
+  pendingMapPoint = {
+    lat: Number(point.lat),
+    lng: Number(point.lng)
+  };
+
+  if (!Number.isFinite(pendingMapPoint.lat) || !Number.isFinite(pendingMapPoint.lng)) return;
+
+  $('mapTapCoords').textContent =
+    pendingMapPoint.lat.toFixed(5) + ', ' + pendingMapPoint.lng.toFixed(5);
+  $('mapTapChoice').hidden = false;
+}
+
+function hideMapTapChoice() {
+  pendingMapPoint = null;
+  $('mapTapChoice').hidden = true;
+}
+
+function applyPendingMapPoint(kind) {
+  if (!pendingMapPoint) return;
+
+  const point = { ...pendingMapPoint };
+
+  if (kind === 'origin') {
+    prefs.mapOrigin = point;
+    originText.value = '';
+    originSelect.value = '';
+    toast('地図で選んだ地点を出発地に設定しました。');
+  } else {
+    prefs.mapDestination = point;
+    destinationText.value = '';
+    destinationSelect.value = '';
+    toast('地図で選んだ地点を到着地に設定しました。');
+  }
+
+  hideMapTapChoice();
+  saveRoutePrefs();
+  updateMarkers();
+  updateRouteSummary();
+  fitSelectedPlaces();
+  scheduleAutomaticAnalysis(350);
+}
+
+function addOpenPickedMarker(key, point, label, color, title) {
+  if (!mapLibre || !point) return;
+
+  const el = document.createElement('div');
+  el.textContent = label;
+  el.style.cssText =
+    'width:30px;height:30px;border-radius:50%;display:grid;place-items:center;' +
+    'background:' + color + ';color:white;font-weight:900;border:3px solid white;' +
+    'box-shadow:0 3px 12px rgba(0,0,0,.35);font-size:12px';
+
+  const marker = new maplibregl.Marker({ element: el })
+    .setLngLat([point.lng, point.lat])
+    .setPopup(new maplibregl.Popup({ offset: 18 }).setText(title))
+    .addTo(mapLibre);
+
+  openMarkers.set(key, marker);
+}
+
+function prepareVoices() {
+  if (!('speechSynthesis' in window)) return;
+
+  const refresh = () => {
+    japaneseVoices = speechSynthesis.getVoices()
+      .filter((voice) => /^ja(?:-|_)/i.test(voice.lang || '') || /japan|日本/i.test(voice.name || ''));
+    renderVoiceOptions();
+  };
+
+  refresh();
+  speechSynthesis.addEventListener?.('voiceschanged', refresh);
+}
+
+function renderVoiceOptions() {
+  const select = $('voiceSelect');
+  if (!select) return;
+
+  const selected = googleSettings.voiceURI || '';
+  select.innerHTML = '<option value="">自動（日本語の自然な音声を優先）</option>';
+
+  const voices = [...japaneseVoices].sort((a, b) => voiceScore(b) - voiceScore(a));
+
+  for (const voice of voices) {
+    const option = document.createElement('option');
+    option.value = voice.voiceURI;
+    option.textContent = voice.name + '（' + voice.lang + '）';
+    select.appendChild(option);
+  }
+
+  select.value = voices.some((voice) => voice.voiceURI === selected) ? selected : '';
+}
+
+function bestJapaneseVoice() {
+  if (!('speechSynthesis' in window)) return null;
+
+  const voices = japaneseVoices.length
+    ? japaneseVoices
+    : speechSynthesis.getVoices().filter((voice) => /^ja(?:-|_)/i.test(voice.lang || ''));
+
+  if (!voices.length) return null;
+
+  if (googleSettings.voiceURI) {
+    const preferred = voices.find((voice) => voice.voiceURI === googleSettings.voiceURI);
+    if (preferred) return preferred;
+  }
+
+  return [...voices].sort((a, b) => voiceScore(b) - voiceScore(a))[0] || null;
+}
+
+function voiceScore(voice) {
+  let score = 0;
+  const lang = String(voice.lang || '').toLowerCase();
+  const name = String(voice.name || '').toLowerCase();
+
+  if (lang === 'ja-jp') score += 50;
+  else if (lang.startsWith('ja')) score += 35;
+
+  if (voice.localService) score += 12;
+  if (/siri|premium|enhanced|kyoko|otoya|hattori|haruka/.test(name)) score += 20;
+  if (/compact|basic/.test(name)) score -= 8;
+
+  return score;
+}
+
 function updateRouteSummary() {
   const nameFor = (id) => id === '__current__'
     ? '現在地'
     : (places.find((p) => p.id === id)?.name || '');
 
-  const a = originText.value.trim() || nameFor(originSelect.value);
-  const b = destinationText.value.trim() || nameFor(destinationSelect.value);
+  const a = originText.value.trim() || (prefs.mapOrigin ? '地図で選択した出発地' : nameFor(originSelect.value));
+  const b = destinationText.value.trim() || (prefs.mapDestination ? '地図で選択した到着地' : nameFor(destinationSelect.value));
 
   $('routeTitle').textContent = a && b ? a + ' → ' + b : '出発地と到着地を設定してください';
 
@@ -1092,7 +1297,9 @@ function saveRoutePrefs() {
     origin: originSelect.value,
     destination: destinationSelect.value,
     originText: originText.value.trim(),
-    destinationText: destinationText.value.trim()
+    destinationText: destinationText.value.trim(),
+    mapOrigin: prefs.mapOrigin || null,
+    mapDestination: prefs.mapDestination || null
   };
   saveJSON(PREF_KEY, prefs);
 }
