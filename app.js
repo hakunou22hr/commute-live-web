@@ -701,7 +701,6 @@ async function analyzeTraffic({ speak = false, force = false } = {}) {
         'warnings'
       ],
       language: 'ja',
-      units: google.maps.UnitSystem.METRIC
     };
 
     const normalRequest = {
@@ -721,7 +720,6 @@ async function analyzeTraffic({ speak = false, force = false } = {}) {
         'warnings'
       ],
       language: 'ja',
-      units: google.maps.UnitSystem.METRIC
     };
 
     const [trafficResult, normalResult] = await Promise.all([
@@ -1239,6 +1237,6 @@ function emptyFeatureCollection() {
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('./sw.js?v=6').catch(() => {});
+    navigator.serviceWorker.register('./sw.js?v=7').catch(() => {});
   });
 }
