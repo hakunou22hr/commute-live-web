@@ -93,3 +93,44 @@ python -m http.server 4173
 ## 安全
 
 運転中は端末を操作しないでください。出発前に設定し、道路標識・警察・道路管理者の指示を優先してください。
+
+
+## Google交通解析モード（任意）
+
+無料PWAの基本機能はAPIキーなしで使えます。現在交通を考慮した所要時間・代替経路・到着予定を自動比較したい場合だけ、Google Maps PlatformのWeb用APIキーをiPhone側に設定します。
+
+### 必要なAPI
+
+- Maps JavaScript API
+- Routes API
+
+### APIキーの安全設定
+
+Google CloudでWeb用の新しいAPIキーを作り、次の制限を設定してください。
+
+- アプリケーションの制限: Webサイト
+- 許可サイト: `https://hakunou22hr.github.io/commute-live-web/*`
+- API制限: Maps JavaScript API / Routes API のみ
+
+APIキーはこのリポジトリには保存しません。PWAの設定画面から入力し、そのiPhoneのlocalStorageだけに保存します。Web用キーはブラウザから参照可能なため、必ずWebサイト制限とAPI制限を併用してください。
+
+### 自動解析する内容
+
+- 現在の交通を考慮した推奨ルート
+- 代替ルート
+- 現在交通を優先しない比較用の通常ルート
+- 所要時間
+- 到着予定時刻
+- 通常時との差
+- Google Routesが返す交通速度区分（通常 / 混雑 / 渋滞）
+- Web Speech APIによる短い音声案内
+
+アプリ側では1日30回の解析上限を設けています。1解析でGoogle経路計算を最大2回利用します。
+
+### 事故・工事・規制の扱い
+
+Google Routesの交通データから遅延や渋滞は検出できますが、その原因が事故・工事・道路規制のどれかを常に判別できるわけではありません。根拠がない場合は「交通状況による遅れ」と表示し、事故・工事と推測しません。JARTICと青森みち情報への公式リンクを残しています。
+
+### 地図に関する重要事項
+
+Google Routesの経路・交通データを表示する場合はGoogle Mapを使用します。APIキー未設定の無料モードではMapLibre + OpenFreeMapを使用しますが、その地図上にGoogle Routesの経路データは表示しません。
