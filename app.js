@@ -207,22 +207,47 @@ async function initMapExperience() {
 function loadGoogleMapsScript(apiKey) {
   if (window.google?.maps?.importLibrary) return Promise.resolve();
 
-  return new Promise((resolve, reject) => {
-    const existing = document.querySelector('script[data-google-maps-loader]');
-    if (existing) {
-      existing.addEventListener('load', resolve, { once: true });
-      existing.addEventListener('error', reject, { once: true });
-      return;
-    }
+  // Google公式の Dynamic Library Import bootstrap と同じ方式で、
+  // importLibrary() を先に定義してから必要なライブラリを読み込みます。
+  const googleNamespace = window.google || (window.google = {});
+  const mapsNamespace = googleNamespace.maps || (googleNamespace.maps = {});
 
-    const script = document.createElement('script');
-    script.dataset.googleMapsLoader = 'true';
-    script.async = true;
-    script.src = 'https://maps.googleapis.com/maps/api/js?key=' + encodeURIComponent(apiKey) + '&v=weekly&loading=async';
-    script.onload = resolve;
-    script.onerror = () => reject(new Error('Google Maps JavaScript APIを読み込めませんでした。'));
-    document.head.appendChild(script);
-  });
+  let loaderPromise;
+  const requestedLibraries = new Set();
+
+  const startLoader = () => {
+    if (loaderPromise) return loaderPromise;
+
+    loaderPromise = new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      const params = new URLSearchParams();
+
+      params.set('libraries', [...requestedLibraries].join(','));
+      params.set('key', apiKey);
+      params.set('v', 'weekly');
+      params.set('callback', 'google.maps.__ib__');
+
+      mapsNamespace.__ib__ = resolve;
+      script.async = true;
+      script.dataset.googleMapsLoader = 'true';
+      script.src = 'https://maps.googleapis.com/maps/api/js?' + params.toString();
+      script.onerror = () => {
+        loaderPromise = null;
+        reject(new Error('Google Maps JavaScript APIを読み込めませんでした。APIキーのWebサイト制限とMaps JavaScript APIの有効化を確認してください。'));
+      };
+
+      document.head.appendChild(script);
+    });
+
+    return loaderPromise;
+  };
+
+  mapsNamespace.importLibrary = (libraryName, ...args) => {
+    requestedLibraries.add(libraryName);
+    return startLoader().then(() => mapsNamespace.importLibrary(libraryName, ...args));
+  };
+
+  return Promise.resolve();
 }
 
 function initOpenMap() {
