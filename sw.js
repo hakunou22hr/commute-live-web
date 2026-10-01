@@ -1,4 +1,4 @@
-const CACHE_NAME = 'commute-live-web-v2';
+const CACHE_NAME = 'commute-live-web-v3';
 const APP_SHELL = [
   './',
   './index.html',
