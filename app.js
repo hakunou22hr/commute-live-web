@@ -396,8 +396,8 @@ function renderSelects() {
   originText.value = prefs.originText || '';
   destinationText.value = prefs.destinationText || '';
 
-  if (originText.value.trim()) originSelect.value = '';
-  if (destinationText.value.trim()) destinationSelect.value = '';
+  if (originText.value.trim() || prefs.mapOrigin) originSelect.value = '';
+  if (destinationText.value.trim() || prefs.mapDestination) destinationSelect.value = '';
 }
 
 function renderSuggestions() {
@@ -1445,6 +1445,6 @@ function emptyFeatureCollection() {
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('./sw.js?v=8').catch(() => {});
+    navigator.serviceWorker.register('./sw.js?v=9').catch(() => {});
   });
 }
