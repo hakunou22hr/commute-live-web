@@ -64,7 +64,11 @@ $('placeForm').addEventListener('submit', (event) => {
   toast('地点を端末内に保存しました。');
 });
 
-$('googleMapsBtn').addEventListener('click', () => {
+$('googleMapsBtn').addEventListener('click', async () => {
+  if (originSelect.value === '__current__' && !currentLocation) {
+    const pos = await locate(false);
+    if (!pos) return;
+  }
   const origin = selectedValue(originSelect.value, true);
   const destination = selectedValue(destinationSelect.value, false);
   if (!origin || !destination) return toast('出発地と到着地を設定してください。');
@@ -235,10 +239,7 @@ async function locate(centerMap = false) {
 
 function selectedValue(id, allowCurrent) {
   if (id === '__current__') {
-    if (!allowCurrent || !currentLocation) {
-      if (allowCurrent) locate(false);
-      return null;
-    }
+    if (!allowCurrent || !currentLocation) return null;
     return `${currentLocation.lat},${currentLocation.lng}`;
   }
   const p = places.find(x => x.id === id);
