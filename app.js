@@ -35,6 +35,12 @@ let mapsLibrary = null;
 let latestAnalysis = null;
 let analysisTimer = null;
 let inMemoryCache = { key: '', at: 0, analysis: null };
+let selectedRouteKey = 'traffic-0';
+let drivingWatchId = null;
+let drivingMarker = null;
+let trafficMarkers = [];
+let drivingSpokenAlerts = new Set();
+let drivingSpokenSteps = new Set();
 
 const $ = (id) => document.getElementById(id);
 const originSelect = $('originSelect');
@@ -207,6 +213,8 @@ function setupListeners() {
   $('setMapOriginBtn').addEventListener('click', () => applyPendingMapPoint('origin'));
   $('setMapDestinationBtn').addEventListener('click', () => applyPendingMapPoint('destination'));
   $('cancelMapTapBtn').addEventListener('click', hideMapTapChoice);
+  $('startDrivingBtn').addEventListener('click', startDrivingFollow);
+  $('stopDrivingBtn').addEventListener('click', stopDrivingFollow);
 }
 
 async function initMapExperience() {
@@ -728,6 +736,8 @@ async function analyzeTraffic({ speak = false, force = false } = {}) {
   if (!force && inMemoryCache.analysis && inMemoryCache.key === cacheKey && Date.now() - inMemoryCache.at < 5 * 60 * 1000) {
     latestAnalysis = inMemoryCache.analysis;
     renderAnalysis(latestAnalysis);
+    drawGoogleRoutes(latestAnalysis);
+    updateSelectedRoutePanel();
     if (speak) speakAnalysis(latestAnalysis);
     return;
   }
@@ -760,6 +770,7 @@ async function analyzeTraffic({ speak = false, force = false } = {}) {
         'staticDurationMillis',
         'distanceMeters',
         'speedPaths',
+        'legs',
         'description',
         'warnings'
       ],
@@ -779,6 +790,7 @@ async function analyzeTraffic({ speak = false, force = false } = {}) {
         'durationMillis',
         'staticDurationMillis',
         'distanceMeters',
+        'legs',
         'description',
         'warnings'
       ],
@@ -799,10 +811,14 @@ async function analyzeTraffic({ speak = false, force = false } = {}) {
     if (!trafficRoutes.length) throw new Error('利用できる経路が見つかりませんでした。');
 
     latestAnalysis = buildAnalysisModel(trafficRoutes, normalRoute);
+    selectedRouteKey = latestAnalysis.recommended.key;
+    drivingSpokenAlerts.clear();
+    drivingSpokenSteps.clear();
     inMemoryCache = { key: cacheKey, at: Date.now(), analysis: latestAnalysis };
 
     renderAnalysis(latestAnalysis);
     drawGoogleRoutes(latestAnalysis);
+    updateSelectedRoutePanel();
     setAnalysisStatus('解析完了', buildStatusSummary(latestAnalysis), latestAnalysis.recommended.delayMinutes >= 8 ? 'warn' : 'ok');
 
     if (speak) speakAnalysis(latestAnalysis);
@@ -826,6 +842,8 @@ function buildAnalysisModel(trafficRoutes, normalRoute) {
       : durationMinutes;
 
     const speedSummary = summarizeSpeedPaths(route.speedPaths || []);
+    const navigationSteps = extractNavigationSteps(route);
+    const trafficSegments = deriveTrafficSegments(route, navigationSteps);
 
     return {
       key: 'traffic-' + index,
@@ -838,6 +856,8 @@ function buildAnalysisModel(trafficRoutes, normalRoute) {
       distanceKm: Number.isFinite(route.distanceMeters) ? route.distanceMeters / 1000 : null,
       eta: new Date(now + durationMinutes * 60000),
       speedSummary,
+      navigationSteps,
+      trafficSegments,
       description: route.description || ''
     };
   });
@@ -850,13 +870,15 @@ function buildAnalysisModel(trafficRoutes, normalRoute) {
       key: 'normal',
       route: normalRoute,
       type: 'normal',
-      label: '通常ルート',
+      label: '通常ルート（渋滞回避を優先しない）',
       durationMinutes,
       staticMinutes: durationMinutes,
       delayMinutes: 0,
       distanceKm: Number.isFinite(normalRoute.distanceMeters) ? normalRoute.distanceMeters / 1000 : null,
       eta: new Date(now + durationMinutes * 60000),
       speedSummary: { normal: 0, slow: 0, jam: 0 },
+      navigationSteps: extractNavigationSteps(normalRoute),
+      trafficSegments: [],
       description: normalRoute.description || ''
     };
   }
@@ -892,15 +914,11 @@ function renderAnalysis(analysis) {
   container.hidden = false;
   container.innerHTML = '';
 
-  const allCards = [
-    analysis.recommended,
-    ...(analysis.alternatives || []),
-    ...(analysis.normal ? [analysis.normal] : [])
-  ];
+  const allCards = routeItems(analysis);
 
   for (const item of allCards) {
     const card = document.createElement('article');
-    card.className = 'route-card ' + item.type;
+    card.className = 'route-card ' + item.type + (item.key === selectedRouteKey ? ' selected' : '');
 
     const trafficText = trafficTextFor(item);
     const distanceText = item.distanceKm == null ? '—' : item.distanceKm.toFixed(1) + ' km';
@@ -925,14 +943,22 @@ function renderAnalysis(analysis) {
         <div class="metric"><strong>${delayText}</strong><span>交通影響</span></div>
       </div>
       ${renderTrafficBars(item)}
+      ${renderTrafficLocations(item)}
+      <button class="route-select-button secondary" type="button" data-route-key="${escapeHtml(item.key)}">
+        ${item.key === selectedRouteKey ? 'この経路を選択中' : 'この経路を選ぶ'}
+      </button>
     `;
 
     container.appendChild(card);
   }
 
+  container.querySelectorAll('[data-route-key]').forEach((button) => {
+    button.addEventListener('click', () => selectRoute(button.dataset.routeKey));
+  });
+
   const attribution = document.createElement('p');
   attribution.className = 'google-attribution';
-  attribution.innerHTML = '<strong>Google</strong> の経路・交通データを使用。事故・工事など遅れの原因は未確認の場合があります。';
+  attribution.innerHTML = '<strong>Google</strong> の経路・交通データを使用。渋滞位置は交通速度区分から示します。事故・工事・規制の原因は別データがない限り断定しません。';
   container.appendChild(attribution);
 }
 
@@ -981,64 +1007,58 @@ function drawGoogleRoutes(analysis) {
 
   clearGoogleRouteOverlays();
 
-  if (analysis.normal?.route?.path?.length) {
+  const all = routeItems(analysis);
+  const selected = selectedRouteItem();
+
+  for (const item of all) {
+    if (!item?.route?.path?.length) continue;
+    if (selected && item.key === selected.key) continue;
+
+    const color = item.type === 'normal' ? '#2563eb' : '#94a3b8';
     googleRouteOverlays.push(new google.maps.Polyline({
       map: googleMap,
-      path: pathToGoogle(analysis.normal.route.path),
-      strokeColor: '#2563eb',
-      strokeOpacity: 0.45,
-      strokeWeight: 7,
+      path: pathToGoogle(item.route.path),
+      strokeColor: color,
+      strokeOpacity: 0.28,
+      strokeWeight: 5,
       zIndex: 1
     }));
   }
 
-  for (const alt of analysis.alternatives || []) {
-    if (!alt.route?.path?.length) continue;
-
-    googleRouteOverlays.push(new google.maps.Polyline({
-      map: googleMap,
-      path: pathToGoogle(alt.route.path),
-      strokeColor: '#f59e0b',
-      strokeOpacity: 0.7,
-      strokeWeight: 5,
-      zIndex: 2
-    }));
-  }
-
-  const recommended = analysis.recommended;
-
-  if (recommended.route?.speedPaths?.length) {
-    for (const speedPath of recommended.route.speedPaths) {
+  if (selected?.route?.speedPaths?.length) {
+    for (const speedPath of selected.route.speedPaths) {
       googleRouteOverlays.push(new google.maps.Polyline({
         map: googleMap,
         path: pathToGoogle(speedPath.path || []),
         strokeColor: colorForSpeed(speedPath.speed),
-        strokeOpacity: 0.95,
-        strokeWeight: 8,
-        zIndex: 4
+        strokeOpacity: 0.98,
+        strokeWeight: 9,
+        zIndex: 5
       }));
     }
-  } else if (recommended.route?.path?.length) {
+  } else if (selected?.route?.path?.length) {
     googleRouteOverlays.push(new google.maps.Polyline({
       map: googleMap,
-      path: pathToGoogle(recommended.route.path),
-      strokeColor: '#22c55e',
-      strokeOpacity: 0.95,
-      strokeWeight: 8,
-      zIndex: 4
+      path: pathToGoogle(selected.route.path),
+      strokeColor: selected.type === 'normal' ? '#2563eb' : '#22c55e',
+      strokeOpacity: 0.98,
+      strokeWeight: 9,
+      zIndex: 5
     }));
   }
 
-  fitGoogleRoutePaths([
-    recommended.route,
-    ...(analysis.alternatives || []).map((item) => item.route),
-    analysis.normal?.route
-  ].filter(Boolean));
+  addTrafficMarkers(selected);
+
+  if (selected?.route) {
+    fitGoogleRoutePaths([selected.route]);
+  }
 }
 
 function clearGoogleRouteOverlays() {
   for (const overlay of googleRouteOverlays) overlay.setMap?.(null);
   googleRouteOverlays = [];
+  for (const marker of trafficMarkers) marker.setMap?.(null);
+  trafficMarkers = [];
 }
 
 function pathToGoogle(path) {
@@ -1082,12 +1102,24 @@ function speakAnalysis(analysis) {
     text += '通常時の目安より約' + rec.delayMinutes + '分遅れています。';
   }
 
+  const notable = rec.trafficSegments
+    .filter((segment) => segment.level === 'jam' || segment.level === 'slow')
+    .slice(0, 3);
+
+  if (notable.length) {
+    text += '交通情報です。';
+    for (const segment of notable) {
+      text += segment.label + 'で' + (segment.level === 'jam' ? '渋滞' : '混雑') + 'があります。';
+    }
+  }
+
   if (alternatives.length) {
     const bestAlternative = alternatives[0];
     text += '代替ルートは約' + bestAlternative.durationMinutes + '分です。';
   }
 
-  text += '事故や工事など遅れの原因はGoogleの経路情報だけでは断定しません。必要に応じて公式道路情報を確認してください。';
+  text += '経路カードから、推奨ルート、代替ルート、渋滞回避を優先しない通常ルートを選べます。';
+  text += '事故や工事、規制の原因は、現在のGoogle経路データだけでは断定していません。';
 
   speakText(text);
 }
@@ -1139,6 +1171,15 @@ async function openGoogleMapsNavigation() {
   url.searchParams.set('travelmode', 'driving');
   url.searchParams.set('dir_action', 'navigate');
 
+  const selected = selectedRouteItem();
+  const path = pathToGoogle(selected?.route?.path || []);
+  if (path.length >= 8) {
+    const waypointIndices = [0.25, 0.5, 0.75]
+      .map((ratio) => Math.min(path.length - 2, Math.max(1, Math.round((path.length - 1) * ratio))));
+    const waypoints = waypointIndices.map((index) => path[index].lat + ',' + path[index].lng);
+    url.searchParams.set('waypoints', waypoints.join('|'));
+  }
+
   window.open(url.toString(), '_blank', 'noopener');
 }
 
@@ -1146,6 +1187,358 @@ function endpointForUrl(value) {
   if (typeof value === 'string') return value;
   if (value && Number.isFinite(value.lat) && Number.isFinite(value.lng)) return value.lat + ',' + value.lng;
   return String(value || '');
+}
+
+function routeItems(analysis = latestAnalysis) {
+  if (!analysis) return [];
+  return [
+    analysis.recommended,
+    ...(analysis.alternatives || []),
+    ...(analysis.normal ? [analysis.normal] : [])
+  ].filter(Boolean);
+}
+
+function selectedRouteItem() {
+  const items = routeItems();
+  return items.find((item) => item.key === selectedRouteKey) || items[0] || null;
+}
+
+function selectRoute(key) {
+  const item = routeItems().find((route) => route.key === key);
+  if (!item) return;
+
+  selectedRouteKey = item.key;
+  drivingSpokenAlerts.clear();
+  drivingSpokenSteps.clear();
+  renderAnalysis(latestAnalysis);
+  drawGoogleRoutes(latestAnalysis);
+  updateSelectedRoutePanel();
+  speakText(item.label + 'を選択しました。所要時間は約' + item.durationMinutes + '分、到着予定は' + spokenTime(item.eta) + 'です。');
+}
+
+function updateSelectedRoutePanel() {
+  const panel = $('selectedRoutePanel');
+  const item = selectedRouteItem();
+
+  if (!panel || !item) {
+    if (panel) panel.hidden = true;
+    return;
+  }
+
+  panel.hidden = false;
+  $('selectedRouteTitle').textContent = item.label;
+  $('selectedRouteSummary').textContent =
+    '約' + item.durationMinutes + '分・' + formatTime(item.eta) + '着' +
+    (item.trafficSegments?.length ? '・混雑/渋滞区間 ' + item.trafficSegments.length + '件' : '');
+}
+
+function extractNavigationSteps(route) {
+  const steps = [];
+  for (const leg of route?.legs || []) {
+    for (const step of leg.steps || []) {
+      const path = pathToGoogle(step.path || []);
+      const start = directionalLocationToPoint(step.startLocation) || path[0] || null;
+      const end = directionalLocationToPoint(step.endLocation) || path[path.length - 1] || null;
+      steps.push({
+        instructions: stripHtml(step.instructions || ''),
+        maneuver: String(step.maneuver || ''),
+        distanceMeters: Number(step.distanceMeters) || 0,
+        path,
+        start,
+        end
+      });
+    }
+  }
+  return steps;
+}
+
+function directionalLocationToPoint(location) {
+  if (!location) return null;
+  const latLng = location.latLng || location.location || location;
+  const lat = typeof latLng.lat === 'function' ? latLng.lat() : Number(latLng.lat);
+  const lng = typeof latLng.lng === 'function' ? latLng.lng() : Number(latLng.lng);
+  return Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null;
+}
+
+function deriveTrafficSegments(route, navigationSteps) {
+  const routePath = pathToGoogle(route?.path || []);
+  const result = [];
+
+  for (const speedPath of route?.speedPaths || []) {
+    const level = speedLevel(speedPath.speed);
+    if (level === 'normal') continue;
+
+    const path = pathToGoogle(speedPath.path || []);
+    if (!path.length) continue;
+
+    const midpoint = path[Math.floor(path.length / 2)];
+    const routeIndex = nearestPathIndex(routePath, midpoint);
+    const distanceKm = routeIndex >= 0 ? pathDistanceKm(routePath, routeIndex) : null;
+    const step = nearestNavigationStep(navigationSteps, midpoint);
+    const instruction = step?.instructions || '';
+    const label = instruction
+      ? (distanceKm == null ? instruction : '出発から約' + distanceKm.toFixed(1) + 'km付近・' + instruction)
+      : (distanceKm == null ? '経路上' : '出発から約' + distanceKm.toFixed(1) + 'km付近');
+
+    result.push({
+      id: level + '-' + result.length + '-' + midpoint.lat.toFixed(4) + '-' + midpoint.lng.toFixed(4),
+      level,
+      midpoint,
+      path,
+      label,
+      instruction
+    });
+  }
+
+  return result.slice(0, 12);
+}
+
+function renderTrafficLocations(item) {
+  if (item.type === 'normal') {
+    return '<p class="traffic-location-note">このルートは交通を優先せず比較した経路です。現在の渋滞区分は付けていません。</p>';
+  }
+
+  const segments = item.trafficSegments || [];
+  if (!segments.length) {
+    return '<p class="traffic-location-note">目立った混雑・渋滞区間は検出されていません。</p>';
+  }
+
+  const rows = segments.slice(0, 6).map((segment) => {
+    const kind = segment.level === 'jam' ? '渋滞' : '混雑';
+    return '<li class="' + segment.level + '"><strong>' + kind + '</strong><span>' + escapeHtml(segment.label) + '</span></li>';
+  }).join('');
+
+  return '<div class="traffic-locations"><strong>交通が遅い場所</strong><ul>' + rows + '</ul></div>';
+}
+
+function addTrafficMarkers(item) {
+  if (!googleMap || !window.google?.maps || !item?.trafficSegments?.length) return;
+
+  for (const segment of item.trafficSegments) {
+    const jam = segment.level === 'jam';
+    const marker = new google.maps.Marker({
+      map: googleMap,
+      position: segment.midpoint,
+      title: (jam ? '渋滞：' : '混雑：') + segment.label,
+      label: {
+        text: jam ? '渋' : '混',
+        color: '#ffffff',
+        fontWeight: '700',
+        fontSize: '11px'
+      },
+      icon: {
+        path: google.maps.SymbolPath.CIRCLE,
+        scale: 14,
+        fillColor: jam ? '#ef4444' : '#f59e0b',
+        fillOpacity: 0.95,
+        strokeColor: '#ffffff',
+        strokeWeight: 2
+      },
+      zIndex: 20
+    });
+    trafficMarkers.push(marker);
+  }
+}
+
+function speedLevel(speed) {
+  const value = String(speed || '').toUpperCase();
+  if (value.includes('TRAFFIC_JAM')) return 'jam';
+  if (value.includes('SLOW')) return 'slow';
+  return 'normal';
+}
+
+function nearestNavigationStep(steps, point) {
+  let best = null;
+  let bestDistance = Infinity;
+
+  for (const step of steps || []) {
+    const candidates = step.path?.length ? step.path : [step.start, step.end].filter(Boolean);
+    for (const candidate of candidates) {
+      const distance = haversineMeters(point, candidate);
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        best = step;
+      }
+    }
+  }
+  return best;
+}
+
+function nearestPathIndex(path, point) {
+  if (!path?.length || !point) return -1;
+  let bestIndex = -1;
+  let bestDistance = Infinity;
+  for (let i = 0; i < path.length; i++) {
+    const distance = haversineMeters(point, path[i]);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      bestIndex = i;
+    }
+  }
+  return bestIndex;
+}
+
+function pathDistanceKm(path, endIndex) {
+  let meters = 0;
+  for (let i = 1; i <= endIndex && i < path.length; i++) {
+    meters += haversineMeters(path[i - 1], path[i]);
+  }
+  return meters / 1000;
+}
+
+function haversineMeters(a, b) {
+  if (!a || !b) return Infinity;
+  const R = 6371000;
+  const toRad = (value) => value * Math.PI / 180;
+  const dLat = toRad(b.lat - a.lat);
+  const dLng = toRad(b.lng - a.lng);
+  const lat1 = toRad(a.lat);
+  const lat2 = toRad(b.lat);
+  const h = Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+
+function stripHtml(value) {
+  const el = document.createElement('div');
+  el.innerHTML = String(value || '');
+  return (el.textContent || el.innerText || '').replace(/\s+/g, ' ').trim();
+}
+
+function startDrivingFollow() {
+  const item = selectedRouteItem();
+  if (!item?.route?.path?.length) {
+    toast('先に交通解析を行い、経路を選択してください。');
+    return;
+  }
+
+  if (!navigator.geolocation) {
+    toast('この端末では位置情報の追従を利用できません。');
+    return;
+  }
+
+  if (drivingWatchId != null) stopDrivingFollow();
+
+  drivingSpokenAlerts.clear();
+  drivingSpokenSteps.clear();
+  $('startDrivingBtn').hidden = true;
+  $('stopDrivingBtn').hidden = false;
+  $('drivingStatus').hidden = false;
+  $('drivingProgress').textContent = '現在地を取得中…';
+  $('drivingInstruction').textContent = '選択した経路に沿って地図を追従します。';
+
+  speakText(item.label + 'で走行追従を開始します。画面を開いたまま利用してください。');
+
+  drivingWatchId = navigator.geolocation.watchPosition(
+    handleDrivingPosition,
+    (error) => {
+      $('drivingProgress').textContent = '現在地を取得できません';
+      $('drivingInstruction').textContent = error.code === 1
+        ? '位置情報の利用を許可してください。'
+        : 'GPS情報を取得できませんでした。';
+    },
+    { enableHighAccuracy: true, maximumAge: 3000, timeout: 12000 }
+  );
+}
+
+function stopDrivingFollow() {
+  if (drivingWatchId != null) {
+    navigator.geolocation.clearWatch(drivingWatchId);
+    drivingWatchId = null;
+  }
+
+  if (drivingMarker) {
+    drivingMarker.setMap?.(null);
+    drivingMarker = null;
+  }
+
+  $('startDrivingBtn').hidden = false;
+  $('stopDrivingBtn').hidden = true;
+  $('drivingStatus').hidden = true;
+  toast('走行追従を停止しました。');
+}
+
+function handleDrivingPosition(position) {
+  const item = selectedRouteItem();
+  if (!item) return;
+
+  const point = {
+    lat: position.coords.latitude,
+    lng: position.coords.longitude
+  };
+  currentLocation = { ...point, accuracy: position.coords.accuracy };
+
+  if (googleMap && window.google?.maps) {
+    if (!drivingMarker) {
+      drivingMarker = new google.maps.Marker({
+        map: googleMap,
+        position: point,
+        title: '走行中の現在地',
+        zIndex: 100
+      });
+    } else {
+      drivingMarker.setPosition(point);
+    }
+    googleMap.panTo(point);
+    if ((googleMap.getZoom?.() || 0) < 15) googleMap.setZoom(15);
+  }
+
+  const routePath = pathToGoogle(item.route.path || []);
+  const nearestIndex = nearestPathIndex(routePath, point);
+  const totalKm = Math.max(0.01, pathDistanceKm(routePath, routePath.length - 1));
+  const progressKm = nearestIndex >= 0 ? pathDistanceKm(routePath, nearestIndex) : 0;
+  const progressPct = Math.min(100, Math.max(0, Math.round(progressKm / totalKm * 100)));
+  const remainingKm = Math.max(0, totalKm - progressKm);
+
+  $('drivingProgress').textContent =
+    item.label + '・進行 ' + progressPct + '%・残り約' + remainingKm.toFixed(1) + 'km';
+
+  const nextStep = nearestUpcomingStep(item.navigationSteps, point);
+  $('drivingInstruction').textContent = nextStep?.instructions || '選択した経路を走行中です。';
+
+  maybeSpeakDrivingStep(nextStep, point);
+  maybeSpeakTrafficAlert(item, point);
+}
+
+function nearestUpcomingStep(steps, point) {
+  let best = null;
+  let bestDistance = Infinity;
+
+  for (let i = 0; i < (steps || []).length; i++) {
+    const step = steps[i];
+    const target = step.start || step.path?.[0] || step.end;
+    if (!target) continue;
+    const distance = haversineMeters(point, target);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      best = { ...step, index: i, distanceMetersFromCurrent: distance };
+    }
+  }
+
+  return best;
+}
+
+function maybeSpeakDrivingStep(step, point) {
+  if (!step?.instructions || step.distanceMetersFromCurrent > 220) return;
+  const key = step.index + ':' + step.instructions;
+  if (drivingSpokenSteps.has(key)) return;
+  drivingSpokenSteps.add(key);
+  speakText('まもなく、' + step.instructions + '。');
+}
+
+function maybeSpeakTrafficAlert(item, point) {
+  for (const segment of item.trafficSegments || []) {
+    const distance = haversineMeters(point, segment.midpoint);
+    if (distance > 1200 || drivingSpokenAlerts.has(segment.id)) continue;
+
+    drivingSpokenAlerts.add(segment.id);
+    const kind = segment.level === 'jam' ? '渋滞' : '混雑';
+    const distanceText = distance >= 1000
+      ? '約' + (distance / 1000).toFixed(1) + 'キロ先'
+      : '約' + Math.max(100, Math.round(distance / 100) * 100) + 'メートル先';
+
+    speakText(distanceText + '、' + segment.label + 'で' + kind + 'があります。選択中の経路はこの区間を通ります。');
+  }
 }
 
 function showMapTapChoice(point) {
@@ -1445,6 +1838,6 @@ function emptyFeatureCollection() {
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('./sw.js?v=9').catch(() => {});
+    navigator.serviceWorker.register('./sw.js?v=10').catch(() => {});
   });
 }
