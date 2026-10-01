@@ -1,9 +1,9 @@
-const CACHE_NAME = 'commute-live-web-v4';
+const CACHE_NAME = 'commute-live-web-v5';
 const APP_SHELL = [
   './',
   './index.html',
-  './styles.css',
-  './app.js',
+  './styles.css?v=5',
+  './app.js?v=5',
   './manifest.json',
   './icon.svg'
 ];
