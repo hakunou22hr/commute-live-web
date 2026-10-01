@@ -1,0 +1,20 @@
+{
+  "name": "通勤ルートLIVE",
+  "short_name": "通勤LIVE",
+  "description": "通勤前に地図・道路情報を確認し、Google Mapsの走行ナビへ引き渡す無料PWA",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#07111f",
+  "theme_color": "#0b1220",
+  "lang": "ja",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "./icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
