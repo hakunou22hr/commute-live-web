@@ -12,7 +12,7 @@
   <link rel="icon" href="./icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="./icon.svg">
   <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@^6.11.2/dist/maplibre-gl.css">
-  <link rel="stylesheet" href="./styles.css?v=9">
+  <link rel="stylesheet" href="./styles.css?v=10">
 </head>
 <body>
   <header class="app-header">
@@ -71,6 +71,22 @@
       </div>
 
       <div id="analysisResults" class="analysis-results" hidden></div>
+
+      <div id="selectedRoutePanel" class="selected-route-panel" hidden>
+        <div>
+          <p class="eyebrow">選択中の経路</p>
+          <strong id="selectedRouteTitle">推奨ルート</strong>
+          <span id="selectedRouteSummary" class="subtle"></span>
+        </div>
+        <div class="driving-actions">
+          <button id="startDrivingBtn" type="button" class="primary">この経路で走行追従を開始</button>
+          <button id="stopDrivingBtn" type="button" class="secondary" hidden>走行追従を停止</button>
+        </div>
+        <div id="drivingStatus" class="driving-status" hidden>
+          <strong id="drivingProgress">現在地を取得中…</strong>
+          <span id="drivingInstruction" class="subtle">選択した経路に沿って地図を追従します。</span>
+        </div>
+      </div>
 
       <div class="primary-actions">
         <button id="googleMapsBtn" class="primary">Google Mapsでナビ開始</button>
@@ -174,6 +190,8 @@
         <p>Google Routesから、現在の交通を考慮した所要時間、通常時との差、渋滞区間、代替経路、到着予定時刻を解析します。</p>
         <strong>原因の断定はしません</strong>
         <p>Google Routesだけでは、遅れの原因が事故・工事・道路規制のどれかを常に判別できません。根拠がない場合は「交通状況による遅れ」と表示し、事故や工事と推測しません。</p>
+        <strong>渋滞区間は地図上で位置を示します</strong>
+        <p>混雑・渋滞の区間は、経路上の位置と近いナビ指示を使って「どのあたりか」を表示し、走行中は近づいたときに音声でも知らせます。</p>
       </div>
       <h2 class="subheading">公式情報の確認先</h2>
       <div class="status-cards">
@@ -197,6 +215,6 @@
   </main>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
-  <script type="module" src="./app.js?v=9"></script>
+  <script type="module" src="./app.js?v=10"></script>
 </body>
 </html>
