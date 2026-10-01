@@ -17,7 +17,7 @@
 <body>
   <header class="app-header">
     <div>
-      <p class="eyebrow">無料PWA・APIキー不要</p>
+      <p class="eyebrow">無料PWA・交通解析は任意設定</p>
       <h1>通勤ルートLIVE</h1>
     </div>
     <button id="locateBtn" class="icon-button" aria-label="現在地へ移動">◎</button>
@@ -57,14 +57,55 @@
 
       <div class="route-summary">
         <strong id="routeTitle">地点を登録してください</strong>
-        <span id="routeHint">実際の交通状況を考慮した経路はGoogle Mapsで確認します。</span>
+        <span id="routeHint">Google交通解析を設定すると、現在の渋滞を考慮した所要時間・代替経路・到着予定を自動比較します。</span>
       </div>
 
-      <div class="primary-actions">
-        <button id="googleMapsBtn" class="primary">Google Mapsで最適ルート</button>
-        <button id="jarticBtn" class="danger">JARTICで渋滞・事故・規制</button>
-        <button id="snowBtn" class="snow">雪・冬期道路情報</button>
+      <div class="analysis-actions">
+        <button id="analyzeBtn" class="primary">交通状況を自動解析</button>
+        <span id="analysisUsage" class="usage-pill">本日 0 / 30回</span>
       </div>
+
+      <div id="analysisStatus" class="analysis-status" aria-live="polite">
+        <strong>交通解析：未設定</strong>
+        <span>下の「Google交通解析の設定」でWeb用APIキーをこの端末に保存すると利用できます。</span>
+      </div>
+
+      <div id="analysisResults" class="analysis-results" hidden></div>
+
+      <div class="primary-actions">
+        <button id="googleMapsBtn" class="primary">Google Mapsでナビ開始</button>
+        <button id="jarticBtn" class="danger">JARTIC公式情報を確認</button>
+        <button id="snowBtn" class="snow">雪・冬期道路情報</button>
+        <button id="speakAnalysisBtn" class="secondary">解析結果を音声で読む</button>
+      </div>
+    </section>
+
+    <section class="panel setup-panel">
+      <details id="googleSetupDetails">
+        <summary>
+          <span>
+            <span class="eyebrow">端末内だけに保存</span>
+            <strong>Google交通解析の設定</strong>
+          </span>
+          <span id="googleModeBadge" class="badge">未設定</span>
+        </summary>
+        <div class="setup-body">
+          <p class="note">自動交通解析にはWeb用のGoogle Maps Platform APIキーが必要です。キーはGitHubには保存せず、このiPhoneのlocalStorageだけに保存します。</p>
+          <label>Web用APIキー
+            <input id="googleApiKey" type="password" autocomplete="off" spellcheck="false" placeholder="AIza...">
+          </label>
+          <div class="setup-actions">
+            <button id="saveGoogleKeyBtn" type="button" class="secondary">この端末に保存</button>
+            <button id="removeGoogleKeyBtn" type="button" class="secondary danger-outline">削除</button>
+          </div>
+          <label class="check-row">
+            <input id="autoSpeakToggle" type="checkbox">
+            解析後に短い音声案内を試す
+          </label>
+          <p class="note">Google Cloudでは、このキーを <strong>Webサイト</strong> 制限にし、<code>https://hakunou22hr.github.io/commute-live-web/*</code> だけを許可してください。API制限は <strong>Maps JavaScript API</strong> と <strong>Routes API</strong> に限定します。</p>
+          <p class="note">1回の解析でGoogle経路計算を最大2回使います。アプリ側では1日30解析までに制限します。</p>
+        </div>
+      </details>
     </section>
 
     <section class="panel">
@@ -76,7 +117,7 @@
         <span id="locationStatus" class="subtle">現在地未取得</span>
       </div>
       <div id="map" role="region" aria-label="地図"></div>
-      <p class="note">この地図は位置確認用です。渋滞を反映した走行ルートはGoogle Mapsへ引き渡します。</p>
+      <p id="mapNote" class="note">APIキー未設定時はMapLibre + OpenFreeMapで位置確認します。Google交通解析を有効にすると、Google経路データはGoogle Map上だけに表示します。</p>
     </section>
 
     <section class="panel">
@@ -109,7 +150,14 @@
     </section>
 
     <section class="panel status-panel">
-      <h2>道路情報の確認先</h2>
+      <h2>事故・工事・規制について</h2>
+      <div class="analysis-limit-note">
+        <strong>自動で判定できる内容</strong>
+        <p>Google Routesから、現在の交通を考慮した所要時間、通常時との差、渋滞区間、代替経路、到着予定時刻を解析します。</p>
+        <strong>原因の断定はしません</strong>
+        <p>Google Routesだけでは、遅れの原因が事故・工事・道路規制のどれかを常に判別できません。根拠がない場合は「交通状況による遅れ」と表示し、事故や工事と推測しません。</p>
+      </div>
+      <h2 class="subheading">公式情報の確認先</h2>
       <div class="status-cards">
         <article>
           <strong>JARTIC</strong>
@@ -120,7 +168,7 @@
           <p>雪・緊急規制・道路画像・通行規制などの公式系情報を確認。</p>
         </article>
       </div>
-      <button id="speakBtn" class="secondary">音声で確認ポイントを読む</button>
+      <button id="speakBtn" class="secondary">公式情報の確認ポイントを音声で読む</button>
     </section>
 
     <section class="panel">
